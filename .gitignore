@@ -1,8 +1,10 @@
 # KAS/Yocto build artifacts
 build/
-layers/
 downloads/
 sstate-cache/
+
+layers/poky/
+layers/meta-openembedded/
 
 # Editor files
 *.swp

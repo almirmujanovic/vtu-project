@@ -1,0 +1,23 @@
+[Unit]
+Description=VTU ECU Simulator
+Documentation=https://github.com/almirmujanovic/vtu-project
+After=network.target
+Wants=sys-devices-virtual-net-vcan0.device
+After=sys-devices-virtual-net-vcan0.device
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/ip link add dev vcan0 type vcan || true
+ExecStartPre=/sbin/ip link set up vcan0 || true
+ExecStart=/usr/bin/vtu-ecu-sim vcan0
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
