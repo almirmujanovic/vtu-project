@@ -84,4 +84,4 @@ local_conf_header:
 
 # Target to build - we'll create a custom image later, start with core-image-base
 target:
-  - core-image-base
+  - vtu-image

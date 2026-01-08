@@ -7,8 +7,9 @@ After=sys-devices-virtual-net-vcan0.device
 
 [Service]
 Type=simple
-ExecStartPre=/sbin/ip link add dev vcan0 type vcan || true
-ExecStartPre=/sbin/ip link set up vcan0 || true
+ExecStartPre=-/sbin/modprobe vcan
+ExecStartPre=-/usr/sbin/ip link add dev vcan0 type vcan
+ExecStartPre=-/usr/sbin/ip link set up vcan0
 ExecStart=/usr/bin/vtu-ecu-sim vcan0
 Restart=on-failure
 RestartSec=5
