@@ -11,7 +11,3 @@ Yocto layer for the Vehicle Telemetry Unit (VTU) project.
 
 - VTU application recipes (ECU simulator, logger, telemetry, console)
 - Custom VTU image
-
-## Maintainer
-
-Your Name <your.email@example.com>
