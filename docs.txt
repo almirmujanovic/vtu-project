@@ -1,0 +1,428 @@
+# Vehicle Telemetry Unit (VTU) - Project Specification
+Version: 1.0
+Date: January 7, 2026
+Platform: Yocto Scarthgap (5.0) + OpenEmbedded + KAS
+
+================================================================================
+                              PROJECT OVERVIEW
+================================================================================
+
+A production-style automotive telemetry system demonstrating embedded Linux
+development with Yocto. Simulates real automotive ECUs, implements OBD-II
+diagnostics, logs CAN bus data, and provides a professional diagnostic console.
+
+Target Machines:
+  - Primary:   qemuarm64 (development/testing)
+  - Secondary: raspberrypi5 (real hardware with CAN interface)
+
+================================================================================
+                           TECHNICAL DECISIONS
+================================================================================
+
+┌─────────────────────┬────────────────────────────────────────────────────────┐
+│ Aspect              │ Decision                                               │
+├─────────────────────┼────────────────────────────────────────────────────────┤
+│ CAN Protocol        │ Classic CAN 2.0B (8-byte payload)                      │
+│ CAN Interface       │ SocketCAN (vcan0 virtual, can0 on RPi5)                │
+│ ISO-TP              │ NOT included initially (architecture allows adding)    │
+│ OBD-II              │ Mode 01 (PIDs), Mode 03 (DTCs), Mode 09 (VIN)          │
+│ DTC Storage         │ SQLite database with freeze-frame data                 │
+│ Logging Format      │ Custom binary (.vtulog) inspired by MDF4               │
+│ IPC/Messaging       │ MQTT (mosquitto broker)                                │
+│ Init System         │ systemd                                                │
+│ Watchdog            │ Yes - software watchdog for service health             │
+│ Console UI          │ ncurses TUI (Qt6 optional future phase)                │
+│ Primary Language    │ C (all components for consistency)                     │
+│ Build Tool          │ KAS + BitBake                                          │
+└─────────────────────┴────────────────────────────────────────────────────────┘
+
+================================================================================
+                              ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         VTU System Architecture                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ECU Simulators (vtu-ecu-sim)                                               │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐                      │
+│  │ Engine ECU    │ │ Transmission  │ │ Body Control  │                      │
+│  │ 0x7E0         │ │ 0x7E1         │ │ 0x7E2         │                      │
+│  └───────┬───────┘ └───────┬───────┘ └───────┬───────┘                      │
+│          └─────────────────┼─────────────────┘                              │
+│                            ▼                                                │
+│                    ┌───────────────┐                                        │
+│                    │   CAN Bus     │                                        │
+│                    │   (vcan0)     │                                        │
+│                    └───────┬───────┘                                        │
+│          ┌─────────────────┼─────────────────┐                              │
+│          ▼                 ▼                 ▼                              │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐                      │
+│  │ OBD-II GW     │ │ CAN Logger    │ │ Telemetry     │                      │
+│  │ (vtu-obdgw)   │ │ (vtu-logger)  │ │(vtu-telemetry)│                      │
+│  └───────┬───────┘ └───────┬───────┘ └───────┬───────┘                      │
+│          │                 │                 │                              │
+│          │                 ▼                 ▼                              │
+│          │         ┌───────────────┐ ┌───────────────┐                      │
+│          │         │ /var/log/vtu/ │ │ MQTT Broker   │                      │
+│          │         │ Binary logs   │ │ (mosquitto)   │                      │
+│          │         │ DTC database  │ └───────┬───────┘                      │
+│          │         └───────────────┘         │                              │
+│          └─────────────────┬─────────────────┘                              │
+│                            ▼                                                │
+│                    ┌───────────────┐                                        │
+│                    │ VTU Console   │                                        │
+│                    │ (ncurses TUI) │                                        │
+│                    └───────────────┘                                        │
+│                                                                             │
+│  ┌───────────────┐                                                          │
+│  │ VTU Watchdog  │ Monitors all services, restarts on failure               │
+│  └───────────────┘                                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+                              COMPONENTS
+================================================================================
+
+1. libvtu-common (Shared Library)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    Common definitions, utilities shared across all components
+   Language:   C
+   Contents:
+     - CAN message definitions (DBC-style header)
+     - OBD-II PID definitions and formulas
+     - DTC definitions (P-codes)
+     - Logging utilities
+     - Error handling macros
+   
+2. vtu-ecu-sim (ECU Simulator)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    Simulates vehicle ECUs broadcasting CAN data
+   Language:   C
+   CAN IDs:
+     - 0x100: Engine Data 1 (RPM, Coolant, Throttle, MAF) - 10ms
+     - 0x101: Engine Data 2 (Load, Intake Temp, Timing) - 100ms
+     - 0x200: Transmission (Gear, Fluid Temp, Torque) - 50ms
+     - 0x300: Body Control (Fuel Level, Odometer, Lights) - 100ms
+   OBD-II:
+     - Responds to 0x7DF (broadcast) and 0x7E0-0x7E2 (addressed)
+     - Supports Mode 01, 03, 09
+   Systemd:    vtu-ecu-sim.service (multi-instance capable)
+
+3. vtu-obdgw (OBD-II Gateway)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    OBD-II diagnostic interface / protocol handler
+   Language:   C
+   Features:
+     - PID request/response handling
+     - DTC read and clear
+     - VIN retrieval
+     - Command-line diagnostic tool mode
+   Supported Modes:
+     - Mode 01: Request current powertrain data (PIDs)
+     - Mode 03: Request emission-related DTCs
+     - Mode 04: Clear DTCs and freeze frame
+     - Mode 09: Request vehicle information (VIN)
+   Systemd:    vtu-obdgw.service
+
+4. vtu-logger (CAN Bus Logger / Black Box)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    Records all CAN traffic for later analysis
+   Language:   C
+   Features:
+     - Binary log format (.vtulog) with microsecond timestamps
+     - Circular buffer mode (configurable max size)
+     - Log rotation with optional compression
+     - Index file for fast seeking
+     - Crash-safe writes (fsync)
+     - Triggered recording (on DTC, on threshold)
+   Storage:    /var/log/vtu/
+   Systemd:    vtu-logger.service
+
+5. vtu-telemetry (Telemetry Publisher)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    Decodes CAN data and publishes to MQTT
+   Language:   C
+   MQTT Topics:
+     - vtu/engine/rpm
+     - vtu/engine/coolant_temp
+     - vtu/engine/throttle
+     - vtu/engine/load
+     - vtu/vehicle/speed
+     - vtu/vehicle/fuel_level
+     - vtu/transmission/gear
+     - vtu/dtc/active (JSON array)
+     - vtu/status/heartbeat
+   Systemd:    vtu-telemetry.service
+
+6. vtu-console (Diagnostic Console)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    ncurses-based diagnostic and monitoring interface
+   Language:   C + ncurses
+   Features:
+     - Live dashboard with gauges (text-based)
+     - DTC viewer with descriptions
+     - Log file viewer/replay
+     - OBD-II PID query interface
+     - Service status overview
+   Keybindings:
+     - [D] Dashboard view
+     - [T] DTC viewer
+     - [L] Log viewer
+     - [P] PID query
+     - [S] Service status
+     - [Q] Quit
+
+7. vtu-watchdog (Service Watchdog)
+   ─────────────────────────────────────────────────────────────────────────
+   Purpose:    Monitors VTU services, restarts on failure
+   Language:   C
+   Features:
+     - Heartbeat monitoring via MQTT
+     - Systemd integration (sd_notify)
+     - Configurable timeouts per service
+     - Failure logging
+   Systemd:    vtu-watchdog.service
+
+================================================================================
+                           OBD-II PID REFERENCE
+================================================================================
+
+Mode 01 - Current Data PIDs:
+┌───────┬───────────────────────────┬──────────┬────────────────────────────┐
+│  PID  │ Description               │ Units    │ Formula                    │
+├───────┼───────────────────────────┼──────────┼────────────────────────────┤
+│ 0x00  │ Supported PIDs [01-20]    │ Bitmap   │ -                          │
+│ 0x04  │ Calculated Engine Load    │ %        │ A * 100 / 255              │
+│ 0x05  │ Engine Coolant Temp       │ °C       │ A - 40                     │
+│ 0x0B  │ Intake Manifold Pressure  │ kPa      │ A                          │
+│ 0x0C  │ Engine RPM                │ rpm      │ ((A*256)+B) / 4            │
+│ 0x0D  │ Vehicle Speed             │ km/h     │ A                          │
+│ 0x0F  │ Intake Air Temperature    │ °C       │ A - 40                     │
+│ 0x10  │ MAF Air Flow Rate         │ g/s      │ ((A*256)+B) / 100          │
+│ 0x11  │ Throttle Position         │ %        │ A * 100 / 255              │
+│ 0x1C  │ OBD Standard              │ Enum     │ A                          │
+│ 0x1F  │ Run Time Since Start      │ seconds  │ (A*256)+B                  │
+│ 0x2F  │ Fuel Tank Level           │ %        │ A * 100 / 255              │
+│ 0x46  │ Ambient Air Temperature   │ °C       │ A - 40                     │
+│ 0x5C  │ Engine Oil Temperature    │ °C       │ A - 40                     │
+└───────┴───────────────────────────┴──────────┴────────────────────────────┘
+
+================================================================================
+                             CAN MESSAGE MAP
+================================================================================
+
+Broadcast Messages (ECU → Bus):
+┌───────────┬─────────────────┬────────┬────────────────────────────────────┐
+│  CAN ID   │ Source          │ Cycle  │ Payload                            │
+├───────────┼─────────────────┼────────┼────────────────────────────────────┤
+│ 0x100     │ Engine ECU      │ 10ms   │ RPM, Coolant, Throttle, MAF        │
+│ 0x101     │ Engine ECU      │ 100ms  │ Load, Intake Temp, Timing Adv      │
+│ 0x200     │ Transmission    │ 50ms   │ Gear, Fluid Temp, Output Speed     │
+│ 0x300     │ Body Control    │ 100ms  │ Fuel Level, Odometer, Door Status  │
+│ 0x400     │ ABS/ESP         │ 20ms   │ Wheel Speeds (x4)                  │
+└───────────┴─────────────────┴────────┴────────────────────────────────────┘
+
+OBD-II Diagnostic Messages:
+┌───────────┬─────────────────┬────────────────────────────────────────────┐
+│  CAN ID   │ Direction       │ Purpose                                    │
+├───────────┼─────────────────┼────────────────────────────────────────────┤
+│ 0x7DF     │ Tester → All    │ OBD-II Broadcast Request                   │
+│ 0x7E0     │ Tester → Engine │ OBD-II Request to Engine ECU               │
+│ 0x7E8     │ Engine → Tester │ OBD-II Response from Engine ECU            │
+│ 0x7E1     │ Tester → Trans  │ OBD-II Request to Transmission ECU         │
+│ 0x7E9     │ Trans → Tester  │ OBD-II Response from Transmission ECU      │
+└───────────┴─────────────────┴────────────────────────────────────────────┘
+
+================================================================================
+                             FILE STRUCTURE
+================================================================================
+
+vtu-project/
+├── kas-vtu-qemu.yml              # KAS config for QEMU target
+├── kas-vtu-rpi5.yml              # KAS config for RPi5 target (Phase 10)
+├── README.md                     # Project documentation
+├── .gitignore
+│
+├── layers/                       # Yocto layers (auto-fetched)
+│   ├── poky/                     # Reference distribution
+│   ├── meta-openembedded/        # OE layers collection
+│   ├── meta-raspberrypi/         # RPi5 BSP (Phase 10)
+│   └── meta-vtu/                 # Our custom layer ←────────────────────┐
+│       ├── COPYING.MIT                                                   │
+│       ├── README.md                                                     │
+│       ├── conf/                                                         │
+│       │   └── layer.conf                                                │
+│       ├── recipes-core/                                                 │
+│       │   └── images/                                                   │
+│       │       └── vtu-image.bb           # Custom VTU image             │
+│       ├── recipes-vtu/                                                  │
+│       │   ├── libvtu-common/                                            │
+│       │   │   ├── libvtu-common_1.0.bb                                  │
+│       │   │   └── files/                                                │
+│       │   │       └── (source code)                                     │
+│       │   ├── vtu-ecu-sim/                                              │
+│       │   │   ├── vtu-ecu-sim_1.0.bb                                    │
+│       │   │   └── files/                                                │
+│       │   ├── vtu-obdgw/                                                │
+│       │   │   ├── vtu-obdgw_1.0.bb                                      │
+│       │   │   └── files/                                                │
+│       │   ├── vtu-logger/                                               │
+│       │   │   ├── vtu-logger_1.0.bb                                     │
+│       │   │   └── files/                                                │
+│       │   ├── vtu-telemetry/                                            │
+│       │   │   ├── vtu-telemetry_1.0.bb                                  │
+│       │   │   └── files/                                                │
+│       │   ├── vtu-console/                                              │
+│       │   │   ├── vtu-console_1.0.bb                                    │
+│       │   │   └── files/                                                │
+│       │   └── vtu-watchdog/                                             │
+│       │       ├── vtu-watchdog_1.0.bb                                   │
+│       │       └── files/                                                │
+│       └── recipes-connectivity/                                         │
+│           └── mosquitto/                                                │
+│               └── mosquitto_%.bbappend   # MQTT config customization    │
+│
+├── build/                        # Build output directory
+│   └── tmp/deploy/images/        # Final images here
+│
+├── downloads/                    # Shared download cache
+└── sstate-cache/                 # Shared state cache
+
+================================================================================
+                              PHASE CHECKLIST
+================================================================================
+
+[ ] Phase 1:  KAS Setup & First Build
+              - Install dependencies
+              - Create kas-vtu-qemu.yml
+              - Build core-image-base for qemuarm64
+              - Boot and verify QEMU works
+
+[ ] Phase 2:  Create meta-vtu Layer
+              - Create layer directory structure
+              - Write conf/layer.conf
+              - Add layer to KAS configuration
+              - Verify layer is detected
+
+[ ] Phase 3:  libvtu-common (Shared Library)
+              - Create recipe with CMake build
+              - Define CAN message structures
+              - Define OBD-II PIDs and formulas
+              - Define DTC codes
+              - Build and verify library installs
+
+[ ] Phase 4:  vtu-ecu-sim (ECU Simulator)
+              - Implement CAN frame generation
+              - Implement OBD-II responder
+              - Create systemd service
+              - Test on virtual CAN
+
+[ ] Phase 5:  vtu-image (Custom Image)
+              - Create image recipe
+              - Add virtual CAN setup
+              - Include vtu-ecu-sim
+              - Boot and verify services start
+
+[ ] Phase 6:  vtu-obdgw (OBD-II Gateway)
+              - Implement Mode 01 handler
+              - Implement Mode 03 (DTCs)
+              - Implement Mode 09 (VIN)
+              - Create CLI tool for testing
+
+[ ] Phase 7:  vtu-logger (CAN Logger)
+              - Implement binary log format
+              - Add circular buffer logic
+              - Implement log rotation
+              - Add index file generation
+              - Test recording and playback
+
+[ ] Phase 8:  vtu-telemetry + MQTT
+              - Add mosquitto to image
+              - Configure mosquitto broker
+              - Implement CAN decoder
+              - Implement MQTT publisher
+              - Test with mosquitto_sub
+
+[ ] Phase 9:  vtu-console (ncurses TUI)
+              - Create dashboard view
+              - Create DTC viewer
+              - Create log viewer
+              - Add MQTT subscription
+              - Full integration test
+
+[ ] Phase 10: Port to Raspberry Pi 5
+              - Create kas-vtu-rpi5.yml
+              - Add meta-raspberrypi layer
+              - Configure CAN interface (MCP2515)
+              - Build and flash to SD card
+              - Test with real CAN hardware
+
+[ ] Phase 11: vtu-watchdog + Advanced Features
+              - Implement heartbeat monitoring
+              - Add systemd watchdog integration
+              - Add triggered recording
+              - Add freeze-frame data to DTCs
+
+[ ] Phase 12: SDK Generation & Documentation
+              - Generate cross-compilation SDK
+              - Test SDK workflow
+              - Document build process
+              - Final integration testing
+
+================================================================================
+                           FUTURE ENHANCEMENTS
+================================================================================
+
+Potential additions (not in initial scope):
+  [ ] ISO-TP (ISO 15765-2) for multi-frame messages
+  [ ] UDS (ISO 14229) extended diagnostics
+  [ ] CAN-FD support (64-byte payloads)
+  [ ] Qt6 graphical dashboard
+  [ ] Data export (CSV, JSON, MDF4)
+  [ ] Remote telemetry (cloud upload)
+  [ ] OTA update support (RAUC/SWUpdate)
+  [ ] Secure boot chain
+  [ ] Hardware security module integration
+
+================================================================================
+                              BUILD COMMANDS
+================================================================================
+
+# Build for QEMU
+kas build kas-vtu-qemu.yml
+
+# Enter BitBake shell (for manual commands)
+kas shell kas-vtu-qemu.yml
+
+# Run QEMU (from kas shell)
+runqemu qemuarm64 nographic
+
+# Build for Raspberry Pi 5
+kas build kas-vtu-rpi5.yml
+
+# Build SDK
+kas shell kas-vtu-qemu.yml -c "bitbake vtu-image -c populate_sdk"
+
+# Rebuild single recipe
+kas shell kas-vtu-qemu.yml -c "bitbake vtu-ecu-sim -c clean && bitbake vtu-ecu-sim"
+
+================================================================================
+                              USEFUL COMMANDS
+================================================================================
+
+# CAN utilities (on target)
+ip link set vcan0 up type vcan          # Create virtual CAN
+candump vcan0                            # View CAN traffic
+cansend vcan0 7DF#0201050000000000       # Send OBD-II request
+cangen vcan0 -v                          # Generate random CAN traffic
+
+# MQTT (on target)
+mosquitto_sub -t "vtu/#" -v              # Subscribe to all VTU topics
+
+# Systemd (on target)
+systemctl status vtu-*                   # Check all VTU services
+journalctl -u vtu-ecu-sim -f             # Follow ECU sim logs
+
+================================================================================

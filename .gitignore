@@ -1,0 +1,15 @@
+# KAS/Yocto build artifacts
+build/
+layers/
+downloads/
+sstate-cache/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/settings.json
+
+# Python
+__pycache__/
+*.pyc

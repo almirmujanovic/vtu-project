@@ -1,0 +1,87 @@
+# KAS Configuration for Vehicle Telemetry Unit (VTU)
+# Target: qemuarm64 (QEMU ARM64 emulator)
+# Yocto Release: Scarthgap (5.0)
+#
+# Build with: kas build kas-vtu-qemu.yml
+# Shell into environment: kas shell kas-vtu-qemu.yml
+
+header:
+  version: 14
+  includes: []
+
+# Machine and distro configuration
+machine: qemuarm64
+distro: poky
+
+# Build configuration
+defaults:
+  repos:
+    branch: scarthgap
+
+# Repository definitions - these are the layers KAS will fetch
+repos:
+  # Poky - the Yocto reference distribution (includes bitbake, oe-core, meta-poky)
+  poky:
+    url: "https://git.yoctoproject.org/poky"
+    path: "layers/poky"
+    branch: scarthgap
+    layers:
+      meta:
+      meta-poky:
+
+  # OpenEmbedded meta-openembedded collection
+  meta-openembedded:
+    url: "https://git.openembedded.org/meta-openembedded"
+    path: "layers/meta-openembedded"
+    branch: scarthgap
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+
+  meta-vtu:
+    path: "layers/meta-vtu"
+
+
+# Local configuration - equivalent to local.conf
+local_conf_header:
+  vtu-config: |
+    # ============================================
+    # VTU Project Local Configuration
+    # ============================================
+    
+    # Build optimization - adjust based on your machine
+    # Use number of CPU cores for parallel tasks
+    BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+    PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+    
+    # Download directory - shared across builds to save bandwidth
+    DL_DIR ?= "${TOPDIR}/../downloads"
+    
+    # Shared state cache - speeds up rebuilds dramatically
+    SSTATE_DIR ?= "${TOPDIR}/../sstate-cache"
+    
+    # Remove old work directories to save disk space
+    INHERIT += "rm_work"
+    
+    # Keep these packages' work dirs for debugging
+    RM_WORK_EXCLUDE += "vtu-*"
+    
+    # Add systemd as init system (modern systems use this)
+    INIT_MANAGER = "systemd"
+    
+    # Enable useful image features
+    EXTRA_IMAGE_FEATURES += "debug-tweaks ssh-server-openssh"
+    
+    # Set root password for development (debug-tweaks allows empty password)
+    # In production, remove debug-tweaks and set proper authentication
+    
+    # QEMU-specific: enable virtio for better performance
+    MACHINE_FEATURES:append = " qemu-usermode"
+    
+    # Accept all licenses for now (be more selective in production)
+    LICENSE_FLAGS_ACCEPTED = "commercial"
+
+# Target to build - we'll create a custom image later, start with core-image-base
+target:
+  - core-image-base
