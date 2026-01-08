@@ -1,6 +1,6 @@
 # Vehicle Telemetry Unit (VTU)
 
-An embedded Linux system for automotive/avionics telemetry built with Yocto/OpenEmbedded.
+An embedded Linux system for automotive telemetry built with Yocto/OpenEmbedded.
 
 ## Features
 
