@@ -1,0 +1,24 @@
+[Unit]
+Description=VTU CAN Bus Data Logger
+Documentation=https://github.com/almirmujanovic/vtu-project
+After=network.target vtu-ecu-sim.service
+Wants=vtu-ecu-sim.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vtu-logger vcan0
+Restart=on-failure
+RestartSec=5
+
+# Create log directory
+RuntimeDirectory=vtu
+LogsDirectory=vtu
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/var/log/vtu
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

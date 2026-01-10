@@ -38,6 +38,7 @@ VTU_PACKAGES = " \
     libvtu-common \
     vtu-ecu-sim \
     vtu-obdgw \
+    vtu-logger \
 "
 
 # ============================================================================
