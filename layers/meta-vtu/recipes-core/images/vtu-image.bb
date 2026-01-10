@@ -39,6 +39,7 @@ VTU_PACKAGES = " \
     vtu-ecu-sim \
     vtu-obdgw \
     vtu-logger \
+    vtu-telemetry \
 "
 
 # ============================================================================
@@ -75,6 +76,8 @@ SYSTEM_PACKAGES = " \
 NETWORK_PACKAGES = " \
     iputils-ping \
     net-tools \
+    mosquitto \
+    mosquitto-clients \
 "
 
 # ============================================================================
