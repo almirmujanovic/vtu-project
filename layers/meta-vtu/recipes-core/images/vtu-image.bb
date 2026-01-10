@@ -40,6 +40,7 @@ VTU_PACKAGES = " \
     vtu-obdgw \
     vtu-logger \
     vtu-telemetry \
+    vtu-console \
 "
 
 # ============================================================================
