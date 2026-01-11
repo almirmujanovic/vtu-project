@@ -1,0 +1,36 @@
+header:
+  version: 14
+  includes:
+    - kas-vtu-base.yml
+
+machine: raspberrypi5
+
+repos:
+  meta-raspberrypi:
+    url: "https://git.yoctoproject.org/meta-raspberrypi"
+    path: "layers/meta-raspberrypi"
+    branch: scarthgap
+
+local_conf_header:
+  rpi5: |
+    # ============================================
+    # Raspberry Pi 5 Configuration
+    # ============================================
+    
+    # Enable UART for serial console (useful for debugging)
+    ENABLE_UART = "1"
+    
+    # Enable SSH server
+    EXTRA_IMAGE_FEATURES += "debug-tweaks ssh-server-openssh"
+    
+    # Image format: wic for easy SD card flashing
+    IMAGE_FSTYPES = "wic.bz2 wic.bmap"
+    
+    # GPU memory (minimum for headless)
+    GPU_MEM = "16"
+    
+    # Disable splash screen for faster boot
+    DISABLE_SPLASH = "1"
+    
+    # Accept Synaptics license for WiFi/BT firmware
+    LICENSE_FLAGS_ACCEPTED:append = " synaptics-killswitch"

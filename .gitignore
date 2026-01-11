@@ -5,6 +5,8 @@ sstate-cache/
 
 layers/poky/
 layers/meta-openembedded/
+layers/meta-raspberrypi/
+
 
 # Editor files
 *.swp

@@ -1,0 +1,54 @@
+# KAS Base Configuration for Vehicle Telemetry Unit (VTU)
+# Shared configuration included by machine-specific KAS files
+# Yocto Release: Scarthgap (5.0)
+
+header:
+  version: 14
+
+distro: poky
+
+defaults:
+  repos:
+    branch: scarthgap
+
+repos:
+  poky:
+    url: "https://git.yoctoproject.org/poky"
+    path: "layers/poky"
+    branch: scarthgap
+    layers:
+      meta:
+      meta-poky:
+
+  meta-openembedded:
+    url: "https://git.openembedded.org/meta-openembedded"
+    path: "layers/meta-openembedded"
+    branch: scarthgap
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+
+  meta-vtu:
+    path: "layers/meta-vtu"
+
+local_conf_header:
+  vtu-base: |
+    # ============================================
+    # VTU Project Base Configuration
+    # ============================================
+    
+    BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+    PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+    DL_DIR ?= "${TOPDIR}/../downloads"
+    SSTATE_DIR ?= "${TOPDIR}/../sstate-cache"
+    
+    INHERIT += "rm_work"
+    RM_WORK_EXCLUDE += "vtu-*"
+    
+    INIT_MANAGER = "systemd"
+    
+    LICENSE_FLAGS_ACCEPTED = "commercial"
+
+target:
+  - vtu-image
